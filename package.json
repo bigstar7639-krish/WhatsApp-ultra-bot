@@ -1,18 +1,9 @@
 {
-  "name": "whatsapp-ultra-bot",
-  "version": "2.0.0",
-  "description": "Ultra Clear Dashboard - QR + Pairing + Groq Llama",
-  "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.8",
-    "express": "^4.18.2",
-    "qrcode": "^1.5.3",
-    "qrcode-terminal": "^0.12.0",
-    "pino": "^8.17.2",
-    "dotenv": "^16.3.1",
-    "groq-sdk": "^0.7.0"
+    "@whiskeysockets/baileys": "^6.7.0",
+    "groq-sdk": "^0.7.0",
+    "pino": "^8.0.0",
+    "express": "^4.18.0",
+    "axios": "^1.6.0"
   }
 }
