@@ -2,10 +2,22 @@ const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, download
 const { Groq } = require('groq-sdk');
 const pino = require('pino');
 const express = require('express');
-const axios = require('axios');
+const QRCode = require('qrcode');
 
 const app = express();
-app.get('/', (req,res)=>res.send('ULTIMATE META AI CLONE - ALL FEATURES LIVE 🔥'));
+let latestQR = null;
+
+app.get('/', (req,res)=>{
+    if(latestQR){
+        res.send(`<h1>Scan QR da 🔥</h1><p>WhatsApp > Linked Devices > Link a device</p><img src="${latestQR}" style="width:300px"><br><a href="/qr">Refresh</a><br><br>ULTIMATE META AI CLONE - LIVE`);
+    } else {
+        res.send('ULTIMATE META AI CLONE - ALL FEATURES LIVE 🔥<br>QR illa da, Bot connect aayiduchu! <br> Illa na Render logs paaru');
+    }
+});
+app.get('/qr', (req,res)=>{
+    if(latestQR) res.send(`<h1>Scan QR da 🔥</h1><img src="${latestQR}" style="width:300px"><br><script>setTimeout(()=>location.reload(),5000)</script>`);
+    else res.send('QR not ready da, 10 sec wait pannu, refresh pannu');
+});
 app.listen(process.env.PORT || 3000, ()=>console.log('Server LIVE'));
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -15,24 +27,37 @@ async function startBot(){
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
     const sock = makeWASocket({ auth: state, logger: pino({level:'silent'}), browser: ['MetaClone','Chrome','1.0'] });
     sock.ev.on('creds.update', saveCreds);
-    sock.ev.on('connection.update', (u)=>{
-        if(u.connection==='close' && u.lastDisconnect?.error?.output?.statusCode!==DisconnectReason.loggedOut) startBot();
-        if(u.connection==='open') console.log('🔥 ALL FEATURES BOT CONNECTED');
+    sock.ev.on('connection.update', async (u)=>{
+        const { connection, lastDisconnect, qr } = u;
+        if(qr){
+            console.log('QR GENERATED DA! Scan pannu!');
+            try{
+                latestQR = await QRCode.toDataURL(qr);
+                console.log('QR ready on website: /qr');
+            }catch(e){ console.log(e) }
+        }
+        if(connection==='close'){
+            latestQR = null;
+            const shouldReconnect = lastDisconnect?.error?.output?.statusCode!==DisconnectReason.loggedOut;
+            console.log('Connection closed, reconnecting:', shouldReconnect);
+            if(shouldReconnect) startBot();
+        }
+        if(connection==='open'){
+            latestQR = null;
+            console.log('🔥 ALL FEATURES BOT CONNECTED');
+        }
     });
 
     sock.ev.on('messages.upsert', async ({messages})=>{
         const msg=messages[0]; if(!msg.message||msg.key.fromMe) return;
         const jid=msg.key.remoteJid;
         let text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || "";
-
-        // FILTERS
         if(jid.includes('@g.us')||jid.includes('status')||jid.includes('broadcast')) return;
         if(text.includes('Number Status')||text.includes('Data Balance')||text.includes('Plan Active')) return;
         if(jid.includes('70008')) return;
         if(COOLDOWN.has(jid)&&Date.now()-COOLDOWN.get(jid)<8000) return;
         COOLDOWN.set(jid, Date.now());
 
-        // ===== 1. PHOTO CREATE FEATURE - LIKE ME =====
         if(text.toLowerCase().startsWith('!img')||text.toLowerCase().startsWith('!image')||text.toLowerCase().startsWith('!photo')||text.toLowerCase().startsWith('!generate')){
             const prompt = text.replace(/!img|!image|!photo|!generate/gi, '').trim();
             if(!prompt){ await sock.sendMessage(jid,{text:"Dei enna photo create pannanum sollu da! Ex:!img batman eating biryani"}); return; }
@@ -44,7 +69,6 @@ async function startBot(){
             return;
         }
 
-        // ===== 2. PHOTO SEE FEATURE - LIKE ME =====
         let imageBase64 = null; let isImage = false;
         if(msg.message.imageMessage){
             try{
@@ -58,7 +82,6 @@ async function startBot(){
 
         try{
             const systemPrompt = `You are Ultimate Meta AI Clone for WhatsApp. You do EVERYTHING like Meta AI:
-
             POWERS:
             - Chat Tanglish/English friendly
             - See & explain photos (if photo sent, describe it fully)
