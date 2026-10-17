@@ -1,62 +1,99 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const { Groq } = require('groq-sdk');
 const pino = require('pino');
 const express = require('express');
 
 const app = express();
 let pairingCodeData = "Generating...";
-app.get('/', (req,res)=> res.send(`<h1>Pairing Code: ${pairingCodeData}</h1><p>WhatsApp > Linked Devices > Link with phone number > Enter code</p><a href="/">Refresh</a>`));
-app.get('/qr', (req,res)=> res.send(`<h1>Pairing Code: ${pairingCodeData}</h1><p>WhatsApp > Linked Devices > Link with phone number</p><script>setTimeout(()=>location.reload(),5000)</script>`));
+
+app.get('/', (req,res) => res.send(`<h1>Pairing Code: ${pairingCodeData}</h1><p>Bot is LIVE</p>`));
+app.get('/qr', (req,res) => res.send(`<h1>Pairing Code: ${pairingCodeData}</h1>`));
 app.listen(process.env.PORT || 3000, ()=>console.log('Server LIVE'));
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const COOLDOWN = new Map();
+const PAUSED = new Map(); // For /stop feature
 
 async function startBot(){
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-    const sock = makeWASocket({ auth: state, logger: pino({level:'silent'}), browser: ['Chrome','Chrome','1.0'] });
-    sock.ev.on('creds.update', saveCreds);
+  const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+  const sock = makeWASocket({ 
+    auth: state, 
+    logger: pino({level:'silent'}),
+    printQRInTerminal: false 
+  });
+  sock.ev.on('creds.update', saveCreds);
 
-    if(!sock.authState.creds.registered){
-        const phoneNumber = (process.env.PHONE_NUMBER || "").replace(/[^0-9]/g,'');
-        if(phoneNumber){
-            setTimeout(async()=>{
-                try{
-                    const code = await sock.requestPairingCode(phoneNumber);
-                    pairingCodeData = code;
-                    console.log(`PAIRING CODE: ${code} for ${phoneNumber}`);
-                }catch(e){ console.log("Pairing error", e.message) }
-            },3000);
-        } else {
-            pairingCodeData = "Set PHONE_NUMBER env var in Render! Ex: 919876543210";
-            console.log("Set PHONE_NUMBER env");
-        }
+  if(!sock.authState.creds.registered){
+    const phoneNumber = (process.env.PHONE_NUMBER || "").replace(/[^0-9]/g,"");
+    if(phoneNumber){
+      setTimeout(async()=>{
+        try{
+          const code = await sock.requestPairingCode(phoneNumber);
+          pairingCodeData = code;
+          console.log(`PAIRING CODE: ${code} for ${phoneNumber}`);
+        }catch(e){ console.log("Pairing error", e.message) }
+      },3000);
+    }else{
+      pairingCodeData = "Set PHONE_NUMBER env var!";
+    }
+  }
+
+  sock.ev.on('connection.update', (u)=>{
+    if(u.connection === 'close'){
+        const shouldReconnect = u.lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+        if(shouldReconnect) startBot();
+    }
+    if(u.connection === 'open'){ 
+        console.log('🔥 CONNECTED'); 
+        pairingCodeData = "CONNECTED ✅";
+    }
+  });
+
+  sock.ev.on('messages.upsert', async ({messages})=>{
+    const msg=messages[0]; 
+    if(!msg.message) return;
+    
+    const jid=msg.key.remoteJid;
+    let text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
+    text = text.trim();
+    if(!text) return;
+
+    // Feature: If YOU send /stop, pause bot for that chat for 5 mins
+    if(msg.key.fromMe){
+      if(text.toLowerCase() === '/stop' || text.toLowerCase() === '/pause'){
+        PAUSED.set(jid, Date.now());
+        await sock.sendMessage(jid,{text:"Ok ✅ 5 mins ku bot pause. Nee pesu da. 5 min ku aprom naane auto start aayiduren."});
+        return;
+      }
+      return; // Don't reply to your own other messages
     }
 
-    sock.ev.on('connection.update', (u)=>{
-        if(u.connection==='close' && u.lastDisconnect?.error?.output?.statusCode!==DisconnectReason.loggedOut) startBot();
-        if(u.connection==='open'){ console.log('🔥 CONNECTED'); pairingCodeData = "CONNECTED!"; }
-    });
+    // If chat is paused, check time
+    if(PAUSED.has(jid)){
+      if(Date.now() - PAUSED.get(jid) < 5*60*1000){
+        return; // Still paused
+      }else{
+        PAUSED.delete(jid); // 5 mins over, auto start
+        // await sock.sendMessage(jid,{text:"I'm back da! 😎 5 mins over."});
+      }
+    }
 
-    sock.ev.on('messages.upsert', async ({messages})=>{
-        const msg=messages[0]; if(!msg.message||msg.key.fromMe) return;
-        const jid=msg.key.remoteJid;
-        let text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption || "";
-        if(jid.includes('@g.us')||jid.includes('status')||jid.includes('broadcast')) return;
-        if(COOLDOWN.has(jid)&&Date.now()-COOLDOWN.get(jid)<8000) return;
-        COOLDOWN.set(jid, Date.now());
-        if(text.toLowerCase().startsWith('!img')){ const prompt=text.replace(/!img/gi,'').trim(); await sock.sendMessage(jid,{text:`🎨 "${prompt}" creating...`}); try{ const url=`https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true`; await sock.sendMessage(jid,{image:{url},caption:prompt}); }catch(e){} return; }
-        let imageBase64=null,isImage=false;
-        if(msg.message.imageMessage){ try{ const b=await downloadMediaMessage(msg,'buffer',{}); imageBase64=b.toString('base64'); isImage=true; if(!text) text="Ithu enna?"; }catch(e){} }
-        if(!text&&!isImage) return;
-        try{
-            const systemPrompt=`You are Ultimate Meta AI Clone for WhatsApp. Chat Tanglish, 2-4 lines, 1 emoji, da/machi if Tamil.`;
-            let aiMessages,model="openai/gpt-oss-20b";
-            if(isImage){ model="meta-llama/llama-4-scout-17b-16e-instruct"; aiMessages=[{role:"system",content:systemPrompt},{role:"user",content:[{type:"text",text},{type:"image_url",image_url:{url:`data:image/jpeg;base64,${imageBase64}`}}]}]; }
-            else aiMessages=[{role:"system",content:systemPrompt},{role:"user",content:text}];
-            const c=await groq.chat.completions.create({model,messages:aiMessages,max_tokens:600,temperature:0.85});
-            await sock.sendMessage(jid,{text:c.choices[0].message.content});
-        }catch(e){ console.log(e.message); }
-    });
+    if(jid.includes('@g.us') || jid.includes('status') || jid.includes('@broadcast')) return;
+    if(COOLDOWN.has(jid) && Date.now()-COOLDOWN.get(jid)<8000) return;
+    COOLDOWN.set(jid, Date.now());
+    
+    try{
+      const systemPrompt = `You are D - a friendly WhatsApp assistant.
+Reply in the SAME language user uses. Support ALL languages (Tamil, English, Hindi, etc). Auto-detect.
+Be friendly, short, helpful, casual like a friend. Use Tanglish if user uses Tanglish.
+Never claim you are Meta AI, ChatGPT, or made by Meta/Google.`;
+
+      const c = await groq.chat.completions.create({
+        model:"openai/gpt-oss-20b", 
+        messages: [{role:"system",content:systemPrompt},{role:"user",content:text}]
+      });
+      await sock.sendMessage(jid,{text: c.choices[0].message.content});
+    }catch(e){ console.log(e.message); }
+  });
 }
 startBot();
