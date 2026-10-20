@@ -12,48 +12,80 @@ let CODE = null;
 let groqClient = null;
 let stoppedUntil = 0;
 
+console.log("⚡ @obito energy ai V17 FINAL Starting...");
+
 if (process.env.GROQ_API_KEY) {
     const { default: Groq } = await import('groq-sdk');
     groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    console.log("✅ GROQ API Connected");
 }
 
 async function askAI(prompt) {
     if (!groqClient) return null;
-    const r = await groqClient.chat.completions.create({
-        model: "llama3-8b-8192",
-        messages: [
-            { role: "system", content: "You are @obito energy ai assistant, created by Krishna. Friendly, powerful, Tamil Tanglish mix. Always introduce as @obito energy ai assistant when asked who are you. Keep replies short, cool, energetic like Obito. Use emojis." },
-            { role: "user", content: prompt }
-        ]
-    });
-    return r.choices[0].message.content;
+    try {
+        const r = await groqClient.chat.completions.create({
+            model: "llama3-8b-8192",
+            messages: [
+                { role: "system", content: "You are @obito energy ai assistant, created by Krishna. Tamil Tanglish mix, short, energetic, always say @obito energy ai assistant." },
+                { role: "user", content: prompt }
+            ]
+        });
+        return r.choices[0].message.content;
+    } catch (e) { console.log("AI Error:", e.message); return null; }
 }
 
 async function start() {
-    const num = (process.env.PHONE_NUMBER || '').replace(/[^0-9]/g, '');
+    const rawNum = process.env.PHONE_NUMBER || '';
+    const num = rawNum.replace(/[^0-9]/g, '');
+    console.log(`📱 PHONE: ${rawNum} -> Clean: ${num}`);
+
     const { version } = await fetchLatestBaileysVersion();
     const { state, saveCreds } = await useMultiFileAuthState('./auth');
+
     const sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
         printQRInTerminal: false,
         auth: state,
-        browser: ['Obito Energy', 'Chrome', '1.0'],
+        browser: ['Obito Energy V17', 'Chrome', '1.0'],
         keepAliveIntervalMs: 10000,
         markOnlineOnConnect: true,
+        syncFullHistory: false,
     });
 
-    if (!sock.authState.creds.registered && num) {
+    if (!sock.authState.creds.registered) {
+        console.log("⏳ Generating Pairing Code...");
         setTimeout(async () => {
-            try { CODE = await sock.requestPairingCode(num); } catch {}
+            try {
+                if (num.length < 10) throw new Error("Invalid PHONE_NUMBER");
+                CODE = await sock.requestPairingCode(num);
+                console.log("========================================");
+                console.log(`🔥 PAIRING CODE: ${CODE}`);
+                console.log(`🔥 CODE: ${CODE.slice(0,4)}-${CODE.slice(4)}`);
+                console.log("📱 WhatsApp -> Linked Devices -> Link with phone number");
+                console.log("========================================");
+            } catch (e) {
+                console.log("❌ Pairing Error:", e.message);
+            }
         }, 3000);
+    } else {
+        console.log("✅ Already Paired");
     }
 
     sock.ev.on('connection.update', async (a) => {
-        if (a.qr) QR = await qrcode.toDataURL(a.qr);
-        if (a.connection === 'open') { QR = null; CODE = null; console.log("✅ @obito Connected"); }
-        if (a.connection === 'close' && a.lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
-            setTimeout(() => start(), 5000);
+        if (a.qr) {
+            QR = await qrcode.toDataURL(a.qr);
+            console.log("📷 QR Ready");
+        }
+        if (a.connection === 'open') {
+            QR = null; CODE = null;
+            console.log("✅✅✅ @obito CONNECTED ✅✅✅");
+        }
+        if (a.connection === 'close') {
+            const reason = a.lastDisconnect?.error?.output?.statusCode;
+            console.log(`❌ Closed Reason: ${reason}`);
+            if (reason !== DisconnectReason.loggedOut) setTimeout(() => start(), 5000);
+            else console.log("🔴 LOGGED OUT - Visit /clear");
         }
     });
 
@@ -68,18 +100,15 @@ async function start() {
 
         if (lower === '.stop') {
             stoppedUntil = Date.now() + 5 * 60 * 1000;
-            await sock.sendMessage(jid, { text: "⚡ @obito energy ai - 5 min rest 😴 Auto varen!" });
-            setTimeout(async () => {
-                stoppedUntil = 0;
-                try { await sock.sendMessage(jid, { text: "⚡ @obito energy ai back da! Full power ready! 🔥" }); } catch {}
-            }, 5 * 60 * 1000);
+            await sock.sendMessage(jid, { text: "⚡ @obito 5 min rest 😴 Auto varen da!" });
+            console.log("⏸️ Stopped 5 min");
+            setTimeout(async () => { stoppedUntil = 0; try { await sock.sendMessage(jid, { text: "⚡ @obito back da! Full power 🔥" }); } catch {} }, 5 * 60 * 1000);
             return;
         }
-
         if (Date.now() < stoppedUntil) return;
 
         if (lower === '.ping') {
-            await sock.sendMessage(jid, { text: "⚡ @obito energy ai assistant Online ✅\nKeepAlive ON - 24/7 🔥" });
+            await sock.sendMessage(jid, { text: "⚡ @obito energy ai Online ✅ V17 24/7" });
             return;
         }
 
@@ -88,37 +117,34 @@ async function start() {
                 const buffer = await downloadMediaMessage(m, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage });
                 const webp = await sharp(buffer).resize(512, 512).webp().toBuffer();
                 await sock.sendMessage(jid, { sticker: webp });
-                return;
             } catch {}
+            return;
         }
 
         if (!txt || !groqClient) return;
-        try {
-            const ans = await askAI(txt);
-            if (ans) await sock.sendMessage(jid, { text: ans });
-        } catch {}
+        try { const ans = await askAI(txt); if (ans) await sock.sendMessage(jid, { text: ans }); } catch {}
     });
 }
 
 app.get('/', (req, res) => {
     const isStopped = Date.now() < stoppedUntil;
-    const remaining = isStopped ? Math.ceil((stoppedUntil - Date.now()) / 1000 / 60) : 0;
-    const status = isStopped ? `⏸️ @obito rest - ${remaining} min la auto` : `⚡ @obito energy ai - 24/7 Running`;
-    const code = CODE ? `<h1 style="background:#000;color:#0f0;padding:20px;">${CODE.slice(0,4)}-${CODE.slice(4)}</h1><b>${CODE}</b><br>WhatsApp -> Link with phone number` : 'Connected ✅';
-    const qr = QR ? `<img src="${QR}" width="300">` : '';
-    res.send(`<center><h1>⚡ @obito energy ai V16 FINAL</h1><h2>${status}</h2>${code}<hr>${qr}<br><a href="/clear">Clear</a><br><p>.ping | .stop = 5min auto</p><script>setTimeout(()=>location.reload(),15000)</script></center>`);
+    const status = isStopped ? `Rest ${Math.ceil((stoppedUntil-Date.now())/60000)}m` : `⚡ @obito V17 Running 24/7`;
+    const codeHtml = CODE ? `<h1 style="background:#000;color:#0f0;padding:20px;font-size:36px;">${CODE.slice(0,4)}-${CODE.slice(4)}</h1><b style="font-size:24px;">${CODE}</b><br><small>Logs la same code irukkum</small>` : '<h2>Connected ✅ / Generating...</h2><p>Check Render Logs for PAIRING CODE</p>';
+    const qrImg = QR ? `<img src="${QR}" width="320">` : '';
+    res.send(`<center><h1>⚡ @obito V17 FINAL</h1><h2>${status}</h2>${codeHtml}<hr>${qrImg}<br><a href="/clear">Clear Auth</a><br><p>.ping | .stop</p><script>setTimeout(()=>location.reload(),10000)</script></center>`);
 });
 
 app.get('/clear', (req, res) => {
-    try { fs.rmSync('./auth', { recursive: true, force: true }); } catch {}
-    res.send('cleared');
+    try { fs.rmSync('./auth', { recursive: true, force: true }); console.log("🗑️ Auth cleared"); } catch {}
+    res.send('Cleared - Restarting...');
     setTimeout(() => process.exit(1), 1000);
 });
 
 app.listen(PORT, () => {
+    console.log(`🚀 Server ${PORT}`);
     start();
     setInterval(() => {
         const url = process.env.RENDER_EXTERNAL_URL;
-        if (url) fetch(url).catch(()=>{});
-    }, 10 * 60 * 1000);
+        if (url) fetch(url).then(()=>console.log("🔄 Keep Alive ping")).catch(()=>{});
+    }, 8 * 60 * 1000);
 });
