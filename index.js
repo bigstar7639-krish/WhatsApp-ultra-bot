@@ -7,36 +7,27 @@ const express = require('express');
 
 const app = express();
 let pairingCode = "Starting...";
-app.get('/', (req,res)=>res.send(`<h1>Krishna's AI 🤖 LIVE 24/7</h1><h2>Code: ${pairingCode}</h2>`));
+app.get('/', (req,res)=>res.send(`<h1>Krishna's AI 🤖 LIVE</h1><h2 style='color:green'>Code: ${pairingCode}</h2><p>Refresh for new code</p>`));
 app.listen(process.env.PORT || 3000, ()=>console.log('Web LIVE'));
 
-// Fix: Convert MongoDB Binary to Buffer
 function convertBinary(obj) {
   if (!obj) return obj;
-  if (obj instanceof Binary) {
-    return Buffer.from(obj.buffer);
-  }
+  if (obj instanceof Binary) return Buffer.from(obj.buffer);
   if (obj instanceof Buffer || obj instanceof Uint8Array) return obj;
-  if (Array.isArray(obj)) {
-    return obj.map(convertBinary);
-  }
+  if (Array.isArray(obj)) return obj.map(convertBinary);
   if (typeof obj === 'object') {
     const newObj = {};
-    for (const k in obj) {
-      newObj[k] = convertBinary(obj[k]);
-    }
+    for (const k in obj) newObj[k] = convertBinary(obj[k]);
     return newObj;
   }
   return obj;
 }
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-
 let mongoClient;
 async function getMongoCollection(){
   if(!mongoClient){
-    const uri = process.env.MONGODB_URI || process.env.MONGO_URL;
-    mongoClient = new MongoClient(uri);
+    mongoClient = new MongoClient(process.env.MONGODB_URI || process.env.MONGO_URL);
     await mongoClient.connect();
     console.log("MongoDB Connected ✅");
   }
@@ -46,7 +37,6 @@ async function getMongoCollection(){
 async function useMongoAuth(){
   const col = await getMongoCollection();
   const doc = await col.findOne({ _id: "creds" });
-  
   let creds, keys;
   if(doc && doc.creds){
     creds = convertBinary(doc.creds);
@@ -54,54 +44,41 @@ async function useMongoAuth(){
     console.log("Loaded creds from MongoDB");
   } else {
     const { state } = await useMultiFileAuthState('/tmp/temp_auth');
-    creds = state.creds;
-    keys = state.keys;
-    console.log("New creds created");
+    creds = state.creds; keys = state.keys;
+    console.log("New creds created - Fresh start");
   }
-
   const saveCreds = async () => {
-    const curCreds = await col.findOne({ _id: "creds" });
-    // merge to keep keys
     await col.updateOne({ _id: "creds" }, { $set: { creds, keys, updated: new Date() } }, { upsert: true });
-    console.log("Creds saved to MongoDB");
+    console.log("Creds saved");
   };
-
-  return {
-    state: {
-      creds,
-      keys: makeCacheableSignalKeyStore(keys, pino({level:'silent'}))
-    },
-    saveCreds
-  };
+  return { state: { creds, keys: makeCacheableSignalKeyStore(keys, pino({level:'silent'})) }, saveCreds };
 }
 
 async function startBot(){
   const { state, saveCreds } = await useMongoAuth();
-  
   const sock = makeWASocket({
     auth: state,
     logger: pino({level:'silent'}),
     browser: ["Krishna AI","Chrome","1.0"],
     markOnlineOnConnect: true
   });
-
   sock.ev.on('creds.update', saveCreds);
 
-  if(!sock.authState.creds.registered){
+  async function getPairing(){
+    if(sock.authState.creds.registered) return;
     const num = (process.env.PHONE_NUMBER||"").replace(/[^0-9]/g,"");
-    if(num){
-      setTimeout(async()=>{
-        try{
-          const code = await sock.requestPairingCode(num);
-          pairingCode = code.match(/.{1,4}/g)?.join("-") || code;
-          console.log("PAIRING CODE:", pairingCode);
-        }catch(e){ 
-          pairingCode = e.message; 
-          console.log("Pair error:", e.message);
-        }
-      },5000);
+    if(!num) { pairingCode = "Set PHONE_NUMBER in Render"; return; }
+    try{
+      const code = await sock.requestPairingCode(num);
+      pairingCode = code.match(/.{1,4}/g)?.join("-") || code;
+      console.log("PAIRING CODE:", pairingCode);
+    }catch(e){
+      console.log("Pair error:", e.message);
+      pairingCode = "Retry in 40s: " + e.message;
     }
+    if(!sock.authState.creds.registered) setTimeout(getPairing, 40000);
   }
+  setTimeout(getPairing, 5000);
 
   sock.ev.on('connection.update', async (u)=>{
     const { connection, lastDisconnect } = u;
@@ -109,14 +86,15 @@ async function startBot(){
     if(connection==='close'){
       const code = lastDisconnect?.error?.output?.statusCode;
       console.log("Disconnect code:", code);
-      if(code !== DisconnectReason.loggedOut){
-        console.log("Reconnecting in 5s...");
-        setTimeout(startBot, 5000);
-      } else {
+      if(code === 401 || code === DisconnectReason.loggedOut){
+        console.log("401 - Deleting bad creds");
         const col = await getMongoCollection();
         await col.deleteOne({ _id: "creds" });
-        pairingCode = "Logged out - restart";
+        pairingCode = "Session expired - Restarting in 5s...";
+        setTimeout(startBot, 5000);
+        return;
       }
+      setTimeout(startBot, 5000);
     }
     if(connection==='open'){
       console.log("✅ CONNECTED 24/7");
@@ -130,17 +108,12 @@ async function startBot(){
     const jid=msg.key.remoteJid;
     let text = msg.message.conversation || msg.message.extendedTextMessage?.text || "";
     text=text.trim();
-    if(!text || jid.includes('status')||jid.includes('broadcast')) return;
-    if(msg.key.fromMe) return;
-
+    if(!text || jid.includes('status')||jid.includes('broadcast')||msg.key.fromMe) return;
     try{
       await sock.sendPresenceUpdate('composing', jid);
       const c = await groq.chat.completions.create({
         model: "llama-3.3-70b-versatile",
-        messages: [
-          {role:"system", content: "You are Krishna's AI, friendly Chennai Tanglish assistant. Under 50 words."},
-          {role:"user", content: text}
-        ],
+        messages: [{role:"system", content: "You are Krishna's AI, friendly Chennai Tanglish assistant. Under 50 words."},{role:"user", content: text}],
         max_tokens: 200
       });
       await sock.sendPresenceUpdate('paused', jid);
@@ -148,5 +121,4 @@ async function startBot(){
     }catch(e){ console.log(e.message); }
   });
 }
-
 startBot();
