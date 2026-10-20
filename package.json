@@ -1,16 +1,16 @@
 {
-  "name": "obito-v26-both",
-  "version": "26.0.0",
+  "name": "obito-v30-clean",
+  "version": "30.0.0",
   "type": "module",
   "main": "index.js",
   "scripts": { "start": "node index.js" },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.22",
+    "baileys": "7.0.0-rc14",
     "express": "^4.21.1",
     "pino": "^9.6.0",
+    "qrcode": "^1.5.4",
     "groq-sdk": "^0.15.0",
-    "sharp": "^0.33.5",
-    "qrcode": "^1.5.4"
+    "sharp": "^0.33.5"
   },
   "engines": { "node": "20.x" }
 }
