@@ -22,7 +22,7 @@ async function askAI(prompt) {
     const r = await groqClient.chat.completions.create({
         model: "llama3-8b-8192",
         messages: [
-            { role: "system", content: "You are @obito energy ai assistant, created by Krishna. You are friendly, powerful, Tamil Tanglish mix. Always introduce as @obito energy ai assistant when asked who are you. Keep replies short, cool, energetic like Obito. Use emojis." },
+            { role: "system", content: "You are @obito energy ai assistant, created by Krishna. Friendly, powerful, Tamil Tanglish mix. Always introduce as @obito energy ai assistant when asked who are you. Keep replies short, cool, energetic like Obito. Use emojis." },
             { role: "user", content: prompt }
         ]
     });
@@ -39,6 +39,8 @@ async function start() {
         printQRInTerminal: false,
         auth: state,
         browser: ['Obito Energy', 'Chrome', '1.0'],
+        keepAliveIntervalMs: 10000,
+        markOnlineOnConnect: true,
     });
 
     if (!sock.authState.creds.registered && num) {
@@ -49,8 +51,10 @@ async function start() {
 
     sock.ev.on('connection.update', async (a) => {
         if (a.qr) QR = await qrcode.toDataURL(a.qr);
-        if (a.connection === 'open') { QR = null; CODE = null; }
-        if (a.connection === 'close' && a.lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) start();
+        if (a.connection === 'open') { QR = null; CODE = null; console.log("✅ @obito Connected"); }
+        if (a.connection === 'close' && a.lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut) {
+            setTimeout(() => start(), 5000);
+        }
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -64,7 +68,7 @@ async function start() {
 
         if (lower === '.stop') {
             stoppedUntil = Date.now() + 5 * 60 * 1000;
-            await sock.sendMessage(jid, { text: "⚡ @obito energy ai - 5 min rest edukkuren 😴 auto varen!" });
+            await sock.sendMessage(jid, { text: "⚡ @obito energy ai - 5 min rest 😴 Auto varen!" });
             setTimeout(async () => {
                 stoppedUntil = 0;
                 try { await sock.sendMessage(jid, { text: "⚡ @obito energy ai back da! Full power ready! 🔥" }); } catch {}
@@ -75,7 +79,7 @@ async function start() {
         if (Date.now() < stoppedUntil) return;
 
         if (lower === '.ping') {
-            await sock.sendMessage(jid, { text: "⚡ @obito energy ai assistant Online ✅\nFull power mode! 🔥" });
+            await sock.sendMessage(jid, { text: "⚡ @obito energy ai assistant Online ✅\nKeepAlive ON - 24/7 🔥" });
             return;
         }
 
@@ -89,7 +93,6 @@ async function start() {
         }
 
         if (!txt || !groqClient) return;
-
         try {
             const ans = await askAI(txt);
             if (ans) await sock.sendMessage(jid, { text: ans });
@@ -100,10 +103,10 @@ async function start() {
 app.get('/', (req, res) => {
     const isStopped = Date.now() < stoppedUntil;
     const remaining = isStopped ? Math.ceil((stoppedUntil - Date.now()) / 1000 / 60) : 0;
-    const status = isStopped ? `⏸️ @obito rest - ${remaining} min` : `⚡ @obito energy ai - Running Full Power`;
-    const code = CODE ? `<h1 style="background:#000;color:#0f0;padding:20px;">${CODE.slice(0,4)}-${CODE.slice(4)}</h1>${CODE}` : 'Generating obito code...';
-    const qr = QR ? `<img src="${QR}" width="300">` : 'Loading...';
-    res.send(`<center><h1>⚡ @obito energy ai</h1><h2>${status}</h2>${code}<hr>${qr}<br><a href="/clear">Clear</a><br><p>.stop = 5min rest + auto back<br>.ping = obito status</p><script>setTimeout(()=>location.reload(),10000)</script></center>`);
+    const status = isStopped ? `⏸️ @obito rest - ${remaining} min la auto` : `⚡ @obito energy ai - 24/7 Running`;
+    const code = CODE ? `<h1 style="background:#000;color:#0f0;padding:20px;">${CODE.slice(0,4)}-${CODE.slice(4)}</h1><b>${CODE}</b><br>WhatsApp -> Link with phone number` : 'Connected ✅';
+    const qr = QR ? `<img src="${QR}" width="300">` : '';
+    res.send(`<center><h1>⚡ @obito energy ai V16 FINAL</h1><h2>${status}</h2>${code}<hr>${qr}<br><a href="/clear">Clear</a><br><p>.ping | .stop = 5min auto</p><script>setTimeout(()=>location.reload(),15000)</script></center>`);
 });
 
 app.get('/clear', (req, res) => {
@@ -112,4 +115,10 @@ app.get('/clear', (req, res) => {
     setTimeout(() => process.exit(1), 1000);
 });
 
-app.listen(PORT, () => { start(); });
+app.listen(PORT, () => {
+    start();
+    setInterval(() => {
+        const url = process.env.RENDER_EXTERNAL_URL;
+        if (url) fetch(url).catch(()=>{});
+    }, 10 * 60 * 1000);
+});
