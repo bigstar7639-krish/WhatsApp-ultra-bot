@@ -1,28 +1,26 @@
 import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, Browsers, downloadMediaMessage } from '@whiskeysockets/baileys';
 import express from 'express';
 import pino from 'pino';
-import qrcode from 'qrcode';
 import fs from 'fs';
 import sharp from 'sharp';
 
 const app = express();
 const PORT = process.env.PORT || 8000;
-let QR = null;
+const MY_NUMBER = "918870799204";
+
 let CODE = null;
+let STATUS = "Starting V24 FINAL...";
+let IS_CONNECTED = false;
+let LAST_TIME = "";
 let groqClient = null;
 let stoppedUntil = 0;
-let STATUS = "Starting V19...";
-let IS_CONNECTED = false;
-let CONNECTED_NUM = "";
-let LAST_TIME = "";
-let pairingAttempts = 0;
 
-console.log("⚡ @obito V19 - 100% P-CODE FIX - Starting...");
+console.log(`⚡ @obito V24 FINAL - ${MY_NUMBER} - ALL LANG`);
 
 if (process.env.GROQ_API_KEY) {
     const { default: Groq } = await import('groq-sdk');
     groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
-    console.log("✅ GROQ Connected");
+    console.log("✅ GROQ ALL LANG READY");
 }
 
 async function askAI(prompt) {
@@ -31,56 +29,17 @@ async function askAI(prompt) {
         const r = await groqClient.chat.completions.create({
             model: "llama3-8b-8192",
             messages: [
-                { role: "system", content: "You are @obito energy ai assistant by Krishna. Tamil Tanglish, short, cool." },
+                { role: "system", content: `You are @obito energy ai bot by Krishna, number 918870799204. RULES: 1. Detect user language and reply in SAME language - Tamil, English, Hindi, Telugu, Malayalam, Kannada, Spanish, Arabic, French, ANY language in world. 2. Short, energetic, cool, friendly. 3. Support all languages.` },
                 { role: "user", content: prompt }
             ]
         });
         return r.choices[0].message.content;
-    } catch (e) { return null; }
-}
-
-async function generatePairingCode(sock, phoneNumber) {
-    try {
-        pairingAttempts++;
-        console.log(`🔄 [Attempt ${pairingAttempts}] Requesting P-Code for ${phoneNumber}...`);
-        STATUS = `Generating P-Code Attempt ${pairingAttempts}...`;
-        
-        // LATEST FIX: Request with 3 sec delay + custom browser
-        CODE = await sock.requestPairingCode(phoneNumber);
-        const formatted = `${CODE.slice(0,4)}-${CODE.slice(4)}`;
-        
-        console.log("========================================");
-        console.log(`🔥🔥🔥 PAIRING CODE: ${CODE} 🔥🔥🔥`);
-        console.log(`🔥 FORMATTED: ${formatted}`);
-        console.log(`📱 ENTER IN: WhatsApp -> Linked Devices -> Link with phone number`);
-        console.log(`⏰ Valid for 60 sec - Attempt: ${pairingAttempts}`);
-        console.log("========================================");
-        
-        STATUS = `Pairing Code Ready: ${formatted} | Attempt ${pairingAttempts} | Valid 60s`;
-        return CODE;
-    } catch (e) {
-        console.log(`❌ P-Code Error (Attempt ${pairingAttempts}):`, e.message);
-        STATUS = `P-Code Failed: ${e.message} - Retrying...`;
-        return null;
-    }
+    } catch { return null; }
 }
 
 async function start() {
-    const raw = process.env.PHONE_NUMBER || '';
-    const num = raw.replace(/[^0-9]/g, '');
-    console.log(`📱 PHONE ENV: ${raw} -> Cleaned: ${num} (must be country code + number, no +)`);
-    
-    if (num.length < 11) {
-        console.log("❌ PHONE_NUMBER invalid! Use 918870799204 format (12 digits)");
-        STATUS = "❌ Invalid PHONE_NUMBER - Use 91 + 10 digits";
-    }
-
     const { version } = await fetchLatestBaileysVersion();
-    console.log(`📦 Baileys Latest Version: ${version} (Fixed 6.7.22)`);
-    
     const { state, saveCreds } = await useMultiFileAuthState('./auth');
-    
-    // LATEST FIX: Use Browsers.ubuntu + correct config【7912633517451486994†L14-L18】
     const sock = makeWASocket({
         version,
         logger: pino({ level: 'silent' }),
@@ -88,75 +47,52 @@ async function start() {
         auth: state,
         browser: Browsers.ubuntu('Chrome'),
         keepAliveIntervalMs: 10000,
-        markOnlineOnConnect: true,
-        syncFullHistory: false,
-        shouldSyncHistoryMessage: () => false,
     });
 
-    // AUTO P-CODE GENERATION - LATEST LOGIC
     if (!sock.authState.creds.registered) {
-        IS_CONNECTED = false;
-        STATUS = "Not registered - Will generate P-Code in 3s...";
-        console.log("⏳ Not registered - Preparing P-Code...");
-        
+        STATUS = `Generating P-Code for ${MY_NUMBER}...`;
         setTimeout(async () => {
-            const code = await generatePairingCode(sock, num);
-            // Auto refresh code every 50 sec if not connected (prevent expire)
-            const refreshInterval = setInterval(async () => {
-                if (!IS_CONNECTED && sock.authState.creds.registered === false) {
-                    console.log("🔄 Auto refreshing P-Code (old expired)...");
-                    await generatePairingCode(sock, num);
-                } else {
-                    clearInterval(refreshInterval);
-                }
-            }, 50000); // 50 sec refresh
+            try {
+                CODE = await sock.requestPairingCode(MY_NUMBER);
+                console.log(`========================================`);
+                console.log(`🔥 NUMBER: ${MY_NUMBER}`);
+                console.log(`🔥 P-CODE: ${CODE}`);
+                console.log(`🔥 FORMATTED: ${CODE.slice(0,4)}-${CODE.slice(4)}`);
+                console.log(`📱 SAME PHONE: Linked Devices -> Link with phone number -> ${CODE}`);
+                console.log(`========================================`);
+                STATUS = `CODE: ${CODE} | ${CODE.slice(0,4)}-${CODE.slice(4)} | Valid 60s`;
+            } catch (e) {
+                console.log("❌", e.message);
+                STATUS = `Error: ${e.message}`;
+            }
         }, 3000);
+
+        setInterval(async () => {
+            if (!IS_CONNECTED && !sock.authState.creds.registered) {
+                try {
+                    CODE = await sock.requestPairingCode(MY_NUMBER);
+                    console.log(`🔄 NEW CODE: ${CODE}`);
+                    STATUS = `NEW CODE: ${CODE} | ${CODE.slice(0,4)}-${CODE.slice(4)}`;
+                } catch {}
+            }
+        }, 45000);
     } else {
-        STATUS = "Already registered - Connecting...";
+        STATUS = "Already paired - Connecting...";
     }
 
-    sock.ev.on('connection.update', async (u) => {
-        const { connection, lastDisconnect, qr } = u;
-        
-        if (qr) {
-            QR = await qrcode.toDataURL(qr);
-            STATUS = "QR Ready - Scan or Use P-Code";
-            console.log("📷 QR Generated");
+    sock.ev.on('connection.update', async (a) => {
+        if (a.connection === 'open') {
+            IS_CONNECTED = true; CODE = null;
+            LAST_TIME = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+            STATUS = `✅ CONNECTED ${MY_NUMBER} - ${LAST_TIME}`;
+            console.log(`✅✅ CONNECTED ${MY_NUMBER} - ${LAST_TIME}`);
         }
-        
-        if (connection === 'connecting') {
-            STATUS = "Connecting to WhatsApp...";
-        }
-        
-        if (connection === 'open') {
-            QR = null; CODE = null;
-            IS_CONNECTED = true;
-            CONNECTED_NUM = num;
-            LAST_TIME = new Date().toLocaleString("en-IN", {timeZone: "Asia/Kolkata"});
-            STATUS = `✅ CONNECTED - ${LAST_TIME}`;
-            pairingAttempts = 0;
-            console.log("✅✅✅ CONNECTED SUCCESSFULLY ✅✅✅");
-            console.log(`Number: ${num} | Time: ${LAST_TIME}`);
-        }
-        
-        if (connection === 'close') {
+        if (a.connection === 'close') {
             IS_CONNECTED = false;
-            const code = lastDisconnect?.error?.output?.statusCode;
-            const msg = lastDisconnect?.error?.message || "";
-            console.log(`❌ Connection closed - Code: ${code} | ${msg}`);
-            
-            if (code === DisconnectReason.loggedOut) {
-                STATUS = "🔴 LOGGED OUT - Clear Auth needed";
-            } else if (code === 405 || msg.includes("405")) {
-                // Specific fix for Couldn't link device - clear and retry
-                STATUS = "❌ P-Code Expired/Invalid - Clearing & Retrying...";
-                console.log("🗑️ Clearing auth due to link failure...");
-                try { fs.rmSync('./auth', { recursive: true, force: true }); } catch {}
-                setTimeout(() => start(), 3000);
-            } else {
-                STATUS = `Disconnected (${code}) - Reconnecting 5s...`;
-                setTimeout(() => start(), 5000);
-            }
+            const c = a.lastDisconnect?.error?.output?.statusCode;
+            console.log(`❌ Closed: ${c}`);
+            if (c !== DisconnectReason.loggedOut) setTimeout(() => start(), 4000);
+            else STATUS = "LOGGED OUT - Go /clear";
         }
     });
 
@@ -169,70 +105,72 @@ async function start() {
         const lower = txt.toLowerCase();
         const jid = m.key.remoteJid;
 
-        if (lower === '.status') {
-            await sock.sendMessage(jid, { text: `⚡ Status\nConnected: ${IS_CONNECTED}\n${STATUS}\nCode: ${CODE || 'None'}` });
-            return;
-        }
+        if (lower === '.ping') { await sock.sendMessage(jid, { text: `⚡ @obito V24 FINAL ONLINE ✅\nNumber: ${MY_NUMBER}\nStatus: ${STATUS}\n🌍 All Language Supported` }); return; }
+        if (lower === '.status') { await sock.sendMessage(jid, { text: `⚡ STATUS\nNumber: ${MY_NUMBER}\n${STATUS}\nConnected: ${IS_CONNECTED}\nLast: ${LAST_TIME}` }); return; }
         if (lower === '.stop') {
             stoppedUntil = Date.now() + 5*60*1000;
             await sock.sendMessage(jid, { text: "⚡ 5 min rest 😴" });
-            setTimeout(async () => { stoppedUntil = 0; try { await sock.sendMessage(jid, { text: "⚡ back da! 🔥" }); } catch {} }, 5*60*1000);
+            setTimeout(() => stoppedUntil = 0, 5*60*1000);
             return;
         }
+        if (lower === '.menu' || lower === '.help') {
+            await sock.sendMessage(jid, { text: `⚡ @obito V24 MENU\n.ping - online check\n.status - status\n.stop - 5min rest\n.menu - this menu\n\nFeatures:\n✅ All Language - Tamil, Hindi, English, Telugu etc\n✅ Sticker - Send image = sticker\n✅ AI Chat - Any language\n\nNumber: ${MY_NUMBER}` });
+            return;
+        }
+
         if (Date.now() < stoppedUntil) return;
-        if (lower === '.ping') { await sock.sendMessage(jid, { text: `⚡ Online V19 ✅\n${STATUS}` }); return; }
 
         if (m.message.imageMessage) {
             try {
                 const buf = await downloadMediaMessage(m, 'buffer', {}, { logger: pino({ level: 'silent' }), reuploadRequest: sock.updateMediaMessage });
-                const webp = await sharp(buf).resize(512,512).webp().toBuffer();
+                const webp = await sharp(buf).resize(512, 512).webp().toBuffer();
                 await sock.sendMessage(jid, { sticker: webp });
             } catch {}
             return;
         }
+
         if (!txt || !groqClient) return;
-        try { const a = await askAI(txt); if (a) await sock.sendMessage(jid, { text: a }); } catch {}
+        try {
+            const ans = await askAI(txt);
+            if (ans) await sock.sendMessage(jid, { text: ans });
+        } catch {}
     });
 }
 
 app.get('/', (req, res) => {
-    let color = IS_CONNECTED ? "#00ff00" : (STATUS.includes("Ready") ? "#ffaa00" : "#ff4444");
-    let statusBox = `<div style="background:#111;color:${color};padding:15px;border:3px solid ${color};margin:10px;">
-        <h2>STATUS: ${STATUS}</h2>
-        <p>Connected: ${IS_CONNECTED ? 'YES ✅' : 'NO ❌'}</p>
-        ${CONNECTED_NUM ? `<p>Num: ${CONNECTED_NUM}<br>Since: ${LAST_TIME}</p>` : ''}
-        <p>Attempts: ${pairingAttempts}</p>
-    </div>`;
+    const box = `<div style="background:#111;color:${IS_CONNECTED ? '#0f0' : '#fa0'};padding:15px;border:3px solid ${IS_CONNECTED ? '#0f0' : '#fa0'};border-radius:10px;"><h2>${STATUS}</h2><p>Number: ${MY_NUMBER}</p><p>Connected: ${IS_CONNECTED ? 'YES ✅' : 'NO ❌'}</p>${LAST_TIME ? `<p>Last: ${LAST_TIME}</p>` : ''}</div>`;
+    const main = IS_CONNECTED ?
+        `<h1 style="background:green;color:white;padding:30px;border-radius:10px;">✅ ${MY_NUMBER} CONNECTED!</h1><p>Bot Online - Send .ping in WhatsApp</p>` :
+        CODE ?
+            `<div style="background:#000;color:#0f0;padding:25px;text-align:center;border-radius:15px;">
+            <h3 style="color:white;">Number: ${MY_NUMBER}</h3>
+            <h1 style="font-size:70px;margin:10px;letter-spacing:5px;">${CODE}</h1>
+            <h2 style="color:yellow;font-size:35px;">${CODE.slice(0,4)}-${CODE.slice(4)}</h2>
+            <p style="color:white;font-size:18px;margin-top:20px;">Same Phone: WhatsApp -> Settings -> Linked Devices -> Link a Device -> Link with phone number -> Enter code</p>
+            <p style="color:red;">Valid 60s - Auto refresh every 45s</p>
+        </div>` :
+            `<h3>Generating P-Code for ${MY_NUMBER}... Wait 5 sec and refresh</h3>`;
 
-    let mainHtml = '';
-    if (IS_CONNECTED) {
-        mainHtml = `<h1 style="background:green;color:white;padding:20px;">✅ CONNECTED - ${CONNECTED_NUM}</h1><p>Bot working! Try .ping</p>`;
-    } else if (CODE) {
-        mainHtml = `<div style="background:#000;padding:20px;">
-            <h1 style="color:#0f0;font-size:42px;margin:0;">${CODE.slice(0,4)}-${CODE.slice(4)}</h1>
-            <h2 style="color:white;">${CODE}</h2>
-            <p style="color:yellow;">⚠️ Auto refresh every 50 sec - Use latest code!</p>
-            <p style="color:white;">Enter in: WhatsApp -> Linked Devices -> Link with phone number</p>
-        </div>`;
-    } else {
-        mainHtml = `<h3>Generating... Wait 5 sec & Refresh</h3>`;
-    }
-
-    const qrImg = !IS_CONNECTED && QR ? `<div style="border:3px solid black;padding:10px;"><h3>OR SCAN QR (100% WORK)</h3><img src="${QR}" width="340"><p>Linked Devices -> Link a Device -> Scan</p></div>` : '';
-
-    res.send(`<center><h1>⚡ @obito V19 - 100% P-CODE FIX (6.7.22)</h1>${statusBox}${mainHtml}${qrImg}<br>
-    <a href="/" style="background:black;color:white;padding:10px;">Refresh</a> <a href="/clear" style="background:red;color:white;padding:10px;margin-left:10px;">Clear Auth</a>
-    <br><br><p>.ping | .status | .stop</p><p><a href="/status">JSON Status</a></p>
-    <p style="color:red;"><b>FIX: If P-Code fails, QR scan - instant connect!</b></p>
-    <p style="font-size:12px;">Fixes: Baileys 6.7.22 latest, Browsers.ubuntu, Auto-refresh P-Code every 50s, Auto clear on 405 error</p>
-    <script>setTimeout(()=>location.reload(),8000)</script></center>`);
+    res.send(`<html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>@obito V24 ${MY_NUMBER}</title></head><body style="font-family:Arial;background:#f0f0f0;"><center style="max-width:600px;margin:auto;padding:20px;">
+    <h1>⚡ @obito V24 FINAL</h1><p style="font-size:18px;font-weight:bold;">${MY_NUMBER}</p>${box}<div style="margin:20px 0;">${main}</div>
+    <a href="/" style="padding:12px 20px;background:#000;color:#fff;text-decoration:none;border-radius:5px;">Refresh Code</a>
+    <a href="/clear" style="padding:12px 20px;background:red;color:#fff;text-decoration:none;border-radius:5px;margin-left:10px;">Clear Auth</a>
+    <div style="margin-top:30px;text-align:left;background:white;padding:15px;border-radius:10px;">
+    <h3>Features:</h3>
+    <p>🌍 All Language - Tamil, Hindi, English, Telugu, Malayalam, Kannada, Arabic etc</p>
+    <p>✅ P-Code Only - Single Device OK</p>
+    <p>✅ AI Chat - Groq</p>
+    <p>✅ Sticker Maker</p>
+    <p>✅ .ping .status .stop .menu</p>
+    <p>✅ 24/7 Online</p>
+    </div>
+    <script>setTimeout(()=>location.reload(),8000)</script></center></body></html>`);
 });
 
-app.get('/status', (req, res) => res.json({ connected: IS_CONNECTED, status: STATUS, code: CODE, formatted: CODE ? `${CODE.slice(0,4)}-${CODE.slice(4)}` : null, attempts: pairingAttempts, hasQR: !!QR, number: CONNECTED_NUM }));
-app.get('/clear', (req, res) => { try { fs.rmSync('./auth', { recursive: true, force: true }); } catch {} IS_CONNECTED = false; CODE = null; QR = null; STATUS = "Cleared - Restarting..."; res.send('Cleared...'); setTimeout(()=>process.exit(1),1000); });
+app.get('/clear', (req, res) => { try { fs.rmSync('./auth', { recursive: true, force: true }); } catch {} res.send('<h1>Cleared - Restarting...</h1>'); setTimeout(() => process.exit(1), 1000); });
 
 app.listen(PORT, () => {
-    console.log(`🚀 V19 Running on ${PORT}`);
+    console.log(`🚀 Port ${PORT} - ${MY_NUMBER}`);
     start();
-    setInterval(() => { const url = process.env.RENDER_EXTERNAL_URL; if (url) fetch(url).catch(()=>{}); }, 7*60*1000);
+    setInterval(() => { const u = process.env.RENDER_EXTERNAL_URL; if (u) fetch(u).catch(() => { }); }, 8 * 60 * 1000);
 });
