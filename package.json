@@ -1,6 +1,6 @@
 {
-  "name": "obito-v30-clean",
-  "version": "30.0.0",
+  "name": "obito-v32-by-krishna",
+  "version": "32.0.0",
   "type": "module",
   "main": "index.js",
   "scripts": { "start": "node index.js" },
