@@ -7,10 +7,9 @@ const express = require('express');
 
 const app = express();
 let pairingCode = "Starting...";
-app.get('/', (req,res)=>res.send(`<h1>Krishna's AI Assistant 🤖 LIVE 24/7</h1><h2>Code: ${pairingCode}</h2><p>Ping me every 5 min to stay alive</p>`));
+app.get('/', (req,res)=>res.send(`<h1>Krishna's AI 🤖 LIVE 24/7</h1><h2>Code: ${pairingCode}</h2>`));
 app.listen(process.env.PORT || 3000, ()=>console.log('Web LIVE'));
 
-// Keep Render alive - self ping every 10 min
 setInterval(()=>{ 
   fetch(`http://${process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost:3000'}`).catch(()=>{});
   console.log("KeepAlive ping");
@@ -20,11 +19,12 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const PAUSED = new Map();
 const COOLDOWN = new Map();
 
-// MongoDB Auth
 let mongoClient;
 async function getMongoCollection(){
   if(!mongoClient){
-    mongoClient = new MongoClient(process.env.MONGODB_URI);
+    const uri = process.env.MONGODB_URI || process.env.MONGO_URL;
+    if(!uri) throw new Error("MONGODB_URI not set!");
+    mongoClient = new MongoClient(uri);
     await mongoClient.connect();
     console.log("MongoDB Connected ✅");
   }
@@ -36,11 +36,11 @@ async function useMongoAuth(){
   const doc = await col.findOne({ _id: "creds" });
   
   let creds, keys;
-  if(doc){
+  if(doc && doc.creds){
     creds = doc.creds;
     keys = doc.keys;
   } else {
-    const { state } = await useMultiFileAuthState('temp_auth');
+    const { state } = await useMultiFileAuthState('/tmp/temp_auth');
     creds = state.creds;
     keys = state.keys;
   }
@@ -54,20 +54,15 @@ async function useMongoAuth(){
       creds,
       keys: makeCacheableSignalKeyStore(keys, pino({level:'silent'}))
     },
-    saveCreds,
-    // also save keys on update
-    saveFull: async (newCreds) => {
-      creds = newCreds;
-      await col.updateOne({ _id: "creds" }, { $set: { creds, keys } }, { upsert: true });
-    }
+    saveCreds
   };
 }
 
 const MOODS = {
-  funny: "You are Krishna's AI Assistant. Funny Chennai friend, Tanglish, 😂. Under 40 words.",
-  serious: "You are Krishna's AI Assistant made by Krishna. Professional, short. Under 50 words.",
-  happy: "You are Krishna's AI Assistant. Positive hype friend! ✨. Under 40 words.",
-  friendly: "You are Krishna's AI Assistant. Best friend, warm Chennai Tanglish. Under 40 words."
+  funny: "You are Krishna's AI. Funny Chennai friend, Tanglish, 😂. Under 40 words.",
+  serious: "You are Krishna's AI made by Krishna. Professional, short. Under 50 words.",
+  happy: "You are Krishna's AI. Positive hype friend! ✨. Under 40 words.",
+  friendly: "You are Krishna's AI. Best friend, warm Chennai Tanglish. Under 40 words."
 };
 
 function detectMood(t){
@@ -93,8 +88,7 @@ async function startBot(){
     logger: pino({level:'silent'}),
     browser: ["Krishna AI","Chrome","1.0"],
     markOnlineOnConnect: true,
-    keepAliveIntervalMs: 30000,
-    retryRequestDelayMs: 1000
+    keepAliveIntervalMs: 30000
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -107,7 +101,7 @@ async function startBot(){
           const code = await sock.requestPairingCode(num);
           pairingCode = code.match(/.{1,4}/g)?.join("-") || code;
           console.log("PAIRING CODE:", pairingCode);
-        }catch(e){ pairingCode = e.message; }
+        }catch(e){ pairingCode = e.message; console.log(e.message); }
       },5000);
     }
   }
@@ -117,19 +111,17 @@ async function startBot(){
     console.log("Connection:", connection);
     if(connection==='close'){
       const code = lastDisconnect?.error?.output?.statusCode;
-      console.log("Disconnect code:", code);
       if(code !== DisconnectReason.loggedOut){
         console.log("Reconnecting in 5s...");
         setTimeout(startBot, 5000);
       } else {
-        console.log("Logged out - delete MongoDB data");
         const col = await getMongoCollection();
         await col.deleteOne({ _id: "creds" });
         pairingCode = "Logged out - restart needed";
       }
     }
     if(connection==='open'){
-      console.log("✅ Krishna's AI CONNECTED 24/7");
+      console.log("✅ CONNECTED 24/7");
       pairingCode = "CONNECTED ✅ 24/7";
     }
   });
@@ -143,8 +135,8 @@ async function startBot(){
     if(!text || jid.includes('status')||jid.includes('broadcast')) return;
 
     if(msg.key.fromMe){
-      if(text.toLowerCase()==='/stop'){ PAUSED.set(jid, Date.now()); await sock.sendMessage(jid,{text:"Ok da ✅ 5 min pause - Krishna's AI 😎"}); return; }
-      if(text.toLowerCase()==='/start'){ PAUSED.delete(jid); await sock.sendMessage(jid,{text:"Back da 💜 - Krishna's AI"}); return; }
+      if(text.toLowerCase()==='/stop'){ PAUSED.set(jid, Date.now()); await sock.sendMessage(jid,{text:"Ok da ✅ 5 min pause"}); return; }
+      if(text.toLowerCase()==='/start'){ PAUSED.delete(jid); await sock.sendMessage(jid,{text:"Back da 💜"}); return; }
       return;
     }
 
@@ -155,8 +147,8 @@ async function startBot(){
 
     const rem = parseReminder(text);
     if(rem){
-      await sock.sendMessage(jid,{text:`✅ Reminder set ${rem.minutes} min - Krishna's AI`});
-      setTimeout(()=>sock.sendMessage(jid,{text:`⏰ Reminder: ${rem.task}\n- Krishna's AI`}), rem.minutes*60*1000);
+      await sock.sendMessage(jid,{text:`✅ Reminder set ${rem.minutes} min`});
+      setTimeout(()=>sock.sendMessage(jid,{text:`⏰ Reminder: ${rem.task}`}), rem.minutes*60*1000);
       return;
     }
 
@@ -164,7 +156,7 @@ async function startBot(){
       await sock.sendPresenceUpdate('composing', jid);
       const mood = detectMood(text);
       const c = await groq.chat.completions.create({
-        model: "openai/gpt-oss-20b",
+        model: "llama-3.3-70b-versatile",
         messages: [{role:"system", content: MOODS[mood]}, {role:"user", content: text}],
         max_tokens: 200
       });
@@ -175,6 +167,4 @@ async function startBot(){
 }
 
 startBot();
-
-// Global error handle - bot never die
-process.on('uncaughtException', (e)=>{ console.log("Error, restarting...", e.message); setTimeout(startBot, 5000); });
+process.on('uncaughtException', (e)=>{ console.log("Error:", e.message); setTimeout(startBot, 5000); });
