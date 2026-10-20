@@ -1,5 +1,5 @@
 {
-  "name": "obito-bot",
+  "name": "obito-energy-bot",
   "type": "module",
   "scripts": { "start": "node index.js" },
   "dependencies": {
