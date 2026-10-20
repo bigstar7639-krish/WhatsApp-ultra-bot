@@ -1,19 +1,16 @@
 {
-  "name": "obito-v24-final",
-  "version": "24.0.0",
+  "name": "obito-v26-both",
+  "version": "26.0.0",
   "type": "module",
   "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
+  "scripts": { "start": "node index.js" },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.22",
     "express": "^4.21.1",
     "pino": "^9.6.0",
     "groq-sdk": "^0.15.0",
-    "sharp": "^0.33.5"
+    "sharp": "^0.33.5",
+    "qrcode": "^1.5.4"
   },
-  "engines": {
-    "node": "20.x"
-  }
+  "engines": { "node": "20.x" }
 }
