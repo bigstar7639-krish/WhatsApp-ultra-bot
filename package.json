@@ -1,6 +1,6 @@
 {
-  "name": "obito-v33-new-rules-compliant",
-  "version": "33.2",
+  "name": "obito-v33-final-fixed",
+  "version": "33.3",
   "type": "module",
   "main": "index.js",
   "scripts": {
