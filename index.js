@@ -2,11 +2,11 @@ import makeWASocket,{useMultiFileAuthState,DisconnectReason,fetchLatestBaileysVe
 const app=express();
 const PORT=process.env.PORT||8000;
 const MY_NUMBER="918870799204";
-let CODE=null,QR=null,STATUS="V33.3 FULL FIX STARTING",IS_CONNECTED=false,IS_PAUSED=false,PAUSE_UNTIL=null,groqClient=null,CURRENT_SOCK=null;
+let CODE=null,QR=null,STATUS="V33.4 FINAL ONLINE FIX",IS_CONNECTED=false,IS_PAUSED=false,PAUSE_UNTIL=null,groqClient=null,CURRENT_SOCK=null;
 const IDENTITY="You are @obito - Personal assistant for Krishna's circle. You help with support, bookings, reminders, tasks, friendly chat. You are NOT a general-purpose AI distribution. You are a private assistant created by Krishna for friends and family. Keep replies concise, helpful, task-focused. Auto detect language Tamil Hindi English Malayalam Telugu Kannada Bengali Marathi Gujarati Urdu Punjabi Odia Assamese Bhojpuri Spanish French German Arabic Russian Japanese Korean Chinese ALL and reply same language. If asked who are you say I am @obito personal assistant created by Krishna for this circle. If asked who made you say Created by Krishna.";
-if(process.env.GROQ_API_KEY){const{default:Groq}=await import('groq-sdk');groqClient=new Groq({apiKey:process.env.GROQ_API_KEY});console.log("✅ Groq client ready");}else{console.log("⚠️ GROQ_API_KEY missing!");}
+if(process.env.GROQ_API_KEY){const{default:Groq}=await import('groq-sdk');groqClient=new Groq({apiKey:process.env.GROQ_API_KEY});console.log("✅ Groq ready");}else{console.log("⚠️ GROQ_API_KEY missing");}
 async function getCodeAllWays(sock){
-for(let i=0;i<6;i++){try{if(i>0)await delay(i*2000);CODE=await sock.requestPairingCode(MY_NUMBER);if(CODE){const fmt=CODE.slice(0,4)+"-"+CODE.slice(4);STATUS="✅ P-CODE "+CODE+" ("+fmt+") FULL FIX";console.log(STATUS);return CODE;}}catch(e){console.log("Pair try "+i+" fail "+e.message);}}
+for(let i=0;i<6;i++){try{if(i>0)await delay(i*2000);CODE=await sock.requestPairingCode(MY_NUMBER);if(CODE){const fmt=CODE.slice(0,4)+"-"+CODE.slice(4);STATUS="✅ BIG CODE "+CODE+" ("+fmt+")";console.log(STATUS);return CODE;}}catch(e){console.log("Pair try "+i+" fail "+e.message);}}
 return null;
 }
 async function start(){
@@ -19,8 +19,14 @@ CURRENT_SOCK=sock;
 sock.ev.on('connection.update',async a=>{
 const{connection,lastDisconnect,qr}=a;
 if(connection==='connecting'&&!state.creds.registered){await delay(2500);await getCodeAllWays(sock);}
-if(qr){QR=await QRCode.toDataURL(qr);STATUS="QR Ready | "+(CODE||"Gen")+" | FULL FIX";console.log(STATUS);}
-if(connection==='open'){IS_CONNECTED=true;CODE=null;QR=null;STATUS="✅ CONNECTED "+MY_NUMBER+" FULL FIX";console.log(STATUS);}
+if(qr){QR=await QRCode.toDataURL(qr);STATUS="QR Ready | "+(CODE||"Gen");console.log(STATUS);}
+if(connection==='open'){
+IS_CONNECTED=true;CODE=null;QR=null;STATUS="✅ CONNECTED "+MY_NUMBER+" FINAL";console.log(STATUS);
+// FINAL FIX: Force online presence every 25 sec
+setInterval(async()=>{try{if(CURRENT_SOCK){await CURRENT_SOCK.sendPresenceUpdate('available');console.log("💚 Presence: available");}}catch(e){}},25000);
+// Also mark chat as available when message comes
+setInterval(async()=>{try{if(CURRENT_SOCK&&IS_CONNECTED){await CURRENT_SOCK.sendPresenceUpdate('available');}}catch(e){}},8*60*1000);
+}
 if(connection==='close'){const r=lastDisconnect?.error?.output?.statusCode;IS_CONNECTED=false;CODE=null;QR=null;if(r===DisconnectReason.loggedOut){try{fs.rmSync('./auth',{recursive:true,force:true});}catch{}}await delay(4000);start();}
 });
 sock.ev.on('creds.update',saveCreds);
@@ -30,31 +36,33 @@ const jid=m.key.remoteJid;
 const isGroup=jid.endsWith('@g.us');
 const senderName=m.pushName||"friend";
 let txt=(m.message.conversation||m.message.extendedTextMessage?.text||m.message.imageMessage?.caption||m.message.videoMessage?.caption||"").trim();
-console.log("📩 New message from "+senderName+" ("+jid+"): "+txt.slice(0,100));
-if(txt.toLowerCase()==='/start'){IS_PAUSED=false;PAUSE_UNTIL=null;await delay(1000);await sock.sendMessage(jid,{text:"⚡ @obito personal assistant activated! Created by Krishna for this circle ⚡"});return;}
-if(txt.toLowerCase()==='/stop'){IS_PAUSED=true;PAUSE_UNTIL=new Date(Date.now()+5*60*1000);await delay(800);await sock.sendMessage(jid,{text:"⏸️ Paused 5 min! Auto resume "+PAUSE_UNTIL.toLocaleTimeString()});setTimeout(()=>{IS_PAUSED=false;PAUSE_UNTIL=null;},5*60*1000);return;}
+console.log("📩 "+senderName+": "+txt.slice(0,100));
+if(txt.toLowerCase()==='/start'){IS_PAUSED=false;PAUSE_UNTIL=null;await delay(800);await sock.sendMessage(jid,{text:"⚡ @obito activated! Krishna's assistant ⚡"});return;}
+if(txt.toLowerCase()==='/stop'){IS_PAUSED=true;PAUSE_UNTIL=new Date(Date.now()+5*60*1000);await delay(800);await sock.sendMessage(jid,{text:"⏸️ Paused 5 min"});setTimeout(()=>{IS_PAUSED=false;PAUSE_UNTIL=null;},5*60*1000);return;}
 if(IS_PAUSED)return;
 if(isGroup&&!txt.toLowerCase().includes('obito')&&Math.random()>0.30)return;
-if(!txt&&m.message.imageMessage){try{const{downloadMediaMessage}=await import('baileys');const buf=await downloadMediaMessage(m,'buffer',{},{logger:pino({level:'silent'}),reuploadRequest:sock.updateMediaMessage});const webp=await sharp(buf).resize(512,512).webp().toBuffer();await delay(1500);await sock.sendMessage(jid,{sticker:webp});}catch(e){console.log("Sticker error: "+e.message);}return;}
+if(!txt&&m.message.imageMessage){try{const{downloadMediaMessage}=await import('baileys');const buf=await downloadMediaMessage(m,'buffer',{},{logger:pino({level:'silent'}),reuploadRequest:sock.updateMediaMessage});const webp=await sharp(buf).resize(512,512).webp().toBuffer();await delay(1500);await sock.sendMessage(jid,{sticker:webp});}catch(e){console.log(e.message);}return;}
 if(txt){
-if(!groqClient){console.log("⚠️ No groqClient");await sock.sendMessage(jid,{text:"⚠️ GROQ_API_KEY missing da! Render > Environment la key add pannu! groq.com la free key edukkalam!"});return;}
+if(!groqClient){await sock.sendMessage(jid,{text:"⚠️ GROQ_API_KEY missing! Render Env la add pannu da!"});return;}
 try{
+await sock.sendPresenceUpdate('composing',{},{jid}); // Typing...
 await delay(1500+Math.random()*1000);
-console.log("🤖 Calling Groq for: "+txt.slice(0,50));
 const r=await groqClient.chat.completions.create({model:"llama3-8b-8192",messages:[{role:"system",content:IDENTITY},{role:"user",content:senderName+": "+txt}],temperature:0.7,max_tokens:600});
-const rep=r.choices[0]?.message?.content;if(rep){await sock.sendMessage(jid,{text:rep});console.log("✅ Sent reply: "+rep.slice(0,80));}
-}catch(e){console.log("❌ Groq error: "+e.message+" | Stack: "+e.stack?.slice(0,200));await sock.sendMessage(jid,{text:"⚡ Obito da! Error: "+e.message+" | Try /start | Check Render logs"});}
+const rep=r.choices[0]?.message?.content;
+await sock.sendPresenceUpdate('paused',{},{jid});
+if(rep){await sock.sendMessage(jid,{text:rep});console.log("✅ Replied");}
+}catch(e){console.log("❌ Error: "+e.message);await sock.sendMessage(jid,{text:"⚡ Error: "+e.message});}
 }
 });
 }
 app.get('/',(req,res)=>{
-const paused=IS_PAUSED?"<h1 style='background:orange;color:white;padding:18px;border-radius:12px;'>PAUSED till "+PAUSE_UNTIL?.toLocaleTimeString()+"</h1>":"";
+const paused=IS_PAUSED?"<h1 style='background:orange;color:white;padding:15px;border-radius:12px;'>PAUSED till "+PAUSE_UNTIL?.toLocaleTimeString()+"</h1>":"";
 const fmt=CODE?CODE.slice(0,4)+"-"+CODE.slice(4):"";
-const codeBox=CODE?"<div style='background:black;padding:45px;border-radius:22px;border:6px solid #0f0;'><h2 style='color:white;'>FOR "+MY_NUMBER+" FULL FIX BIG</h2><h1 style='color:#0f0;font-size:95px;'>"+CODE+"</h1><h1 style='color:yellow;font-size:70px;'>"+fmt+"</h1><a href='/pair' style='background:yellow;color:black;padding:15px 25px;text-decoration:none;border-radius:10px;'>New BIG</a></div>":"<h1>Generating FULL FIX BIG CODE...</h1>";
-const qrBox=QR?"<img src='"+QR+"' style='width:480px;height:480px;border:10px solid black;border-radius:20px;'/>" :"<h3>QR Generating...</h3>";
-const main=IS_CONNECTED?paused+"<h1 style='background:green;color:white;padding:40px;border-radius:20px;font-size:50px;'>✅ CONNECTED FULL FIX<br>"+MY_NUMBER+"<br>@obito by Krishna<br><small>Logs la check pannu</small></h1>":paused+qrBox+"<hr>"+codeBox;
-res.send("<center style='max-width:900px;margin:auto;font-family:Arial;'><h1>⚡ OBITO V33.3 FULL FIX</h1><p>"+STATUS+"</p><p style='color:green;'>✅ Groq check + Logs + Anti-ban + 2026 Rules</p><p style='color:orange;'>Groq Key: "+(groqClient?"✅ Ready":"❌ Missing - Add in Render")+"</p>"+main+"<br><br><a href='/'>Refresh</a> <a href='/clear'>Clear</a> <a href='/pair'>New BIG</a><script>setTimeout(()=>location.reload(),25000)</script></center>");
+const codeBox=CODE?"<div style='background:black;padding:40px;border-radius:20px;border:5px solid #0f0;'><h2 style='color:white;'>FOR "+MY_NUMBER+"</h2><h1 style='color:#0f0;font-size:90px;'>"+CODE+"</h1><h1 style='color:yellow;font-size:65px;'>"+fmt+"</h1></div>":"<h1>Generating CODE...</h1>";
+const qrBox=QR?"<img src='"+QR+"' style='width:470px;height:470px;border:8px solid black;border-radius:18px;'/>" :"<h3>QR Generating...</h3>";
+const main=IS_CONNECTED?paused+"<h1 style='background:green;color:white;padding:35px;border-radius:18px;font-size:45px;'>✅ CONNECTED FINAL<br>"+MY_NUMBER+"<br>Presence: Active Every 25s<br>@obito by Krishna</h1>":paused+qrBox+"<hr>"+codeBox;
+res.send("<center style='max-width:850px;margin:auto;font-family:Arial;'><h1>⚡ OBITO V33.4 FINAL</h1><p>"+STATUS+"</p><p>Groq: "+(groqClient?"✅":"❌ Missing")+" | Presence: 💚 Every 25s</p>"+main+"<br><br><a href='/'>Refresh</a> | <a href='/clear'>Clear</a> | <a href='/pair'>New BIG</a><script>setTimeout(()=>location.reload(),25000)</script></center>");
 });
-app.get('/pair',async(req,res)=>{if(!CURRENT_SOCK)return res.send("Wait");await getCodeAllWays(CURRENT_SOCK);if(!CODE)return res.send("Fail <a href='/clear'>Clear</a>");const fmt=CODE.slice(0,4)+"-"+CODE.slice(4);res.send("<center><h1 style='font-size:85px;'>"+CODE+"</h1><h1 style='font-size:65px;background:black;color:yellow;padding:25px;border-radius:15px;'>"+fmt+"</h1><a href='/'>Back</a></center>");});
-app.get('/clear',(req,res)=>{try{fs.rmSync('./auth',{recursive:true,force:true});}catch{}QR=null;CODE=null;STATUS="Cleared FULL FIX";res.send('<h1>Cleared</h1><script>setTimeout(()=>location.href="/",3000)</script>');setTimeout(()=>start(),2000);});
-app.listen(PORT,()=>{start();console.log("🚀 FULL FIX V33.3 - "+PORT);const url=process.env.RENDER_EXTERNAL_URL;if(url)setInterval(()=>fetch(url).catch(()=>{}),8*60*1000);});
+app.get('/pair',async(req,res)=>{if(!CURRENT_SOCK)return res.send("Wait");await getCodeAllWays(CURRENT_SOCK);if(!CODE)return res.send("Fail <a href='/clear'>Clear</a>");const fmt=CODE.slice(0,4)+"-"+CODE.slice(4);res.send("<center><h1 style='font-size:80px;'>"+CODE+"</h1><h1 style='background:black;color:yellow;padding:20px;'>"+fmt+"</h1><a href='/'>Back</a></center>");});
+app.get('/clear',(req,res)=>{try{fs.rmSync('./auth',{recursive:true,force:true});}catch{}QR=null;CODE=null;STATUS="Cleared";res.send('<h1>Cleared</h1><script>setTimeout(()=>location.href="/",2000)</script>');setTimeout(()=>start(),2000);});
+app.listen(PORT,()=>{start();console.log("🚀 FINAL V33.4 - "+PORT);const url=process.env.RENDER_EXTERNAL_URL;if(url)setInterval(()=>fetch(url).catch(()=>{}),8*60*1000);});
