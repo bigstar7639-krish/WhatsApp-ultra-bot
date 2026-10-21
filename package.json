@@ -1,13 +1,11 @@
 {
-  "name": "obito-v33-final-fixed",
-  "version": "33.3",
+  "name": "obito-v34-final",
+  "version": "34.0",
   "type": "module",
   "main": "index.js",
-  "scripts": {
-    "start": "node index.js"
-  },
+  "scripts": { "start": "node index.js" },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.0",
+    "@whiskeysockets/baileys": "^6.7.18",
     "express": "^4.18.2",
     "pino": "^8.17.0",
     "qrcode": "^1.5.3"
