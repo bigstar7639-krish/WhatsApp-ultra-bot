@@ -1,6 +1,6 @@
 {
-  "name": "obito-v34-final",
-  "version": "34.0",
+  "name": "obito-v36-final",
+  "version": "36.0",
   "type": "module",
   "main": "index.js",
   "scripts": { "start": "node index.js" },
