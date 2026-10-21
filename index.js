@@ -1,101 +1,130 @@
 import express from 'express';
 import fs from 'fs';
-import path from 'path';
 import pino from 'pino';
 import QRCode from 'qrcode';
-import makeWASocket, { useMultiFileAuthState, Browsers, makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
+import makeWASocket, { useMultiFileAuthState, Browsers, makeCacheableSignalKeyStore, DisconnectReason } from '@whiskeysockets/baileys';
 
 const app = express();
 const PORT = process.env.PORT || 10000;
-const AUTH_FOLDER = './auth';
-let authDataBase64 = '';
-let connectionStatus = 'Starting...';
-let pairCode = '';
-let qrImage = '';
-const delay = ms => new Promise(r => setTimeout(r, ms));
+const AUTH_DIR = './auth';
+let qrBase64 = '';
+let pairCode = 'Generating...';
+let status = 'Starting...';
+let authB64 = '';
 
-function loadAuth(){
-  if(process.env.AUTH_DATA){
-    try{
-      const data = JSON.parse(Buffer.from(process.env.AUTH_DATA,'base64').toString('utf-8'));
-      if(!fs.existsSync(AUTH_FOLDER)) fs.mkdirSync(AUTH_FOLDER,{recursive:true});
-      for(const f in data) fs.writeFileSync(path.join(AUTH_FOLDER,f), data[f],'utf-8');
-      console.log('✅ AUTH_DATA Loaded');
-      return true;
-    }catch(e){ console.log('Load fail') }
-  }
-  return false;
-}
-async function saveAuth(){
-  try{
-    if(!fs.existsSync(AUTH_FOLDER)) return;
-    const files = fs.readdirSync(AUTH_FOLDER);
-    const data={}; for(const f of files) data[f]=fs.readFileSync(path.join(AUTH_FOLDER,f),'utf-8');
-    const b64 = Buffer.from(JSON.stringify(data)).toString('base64');
-    authDataBase64=b64; fs.writeFileSync('auth_data.txt',b64,'utf-8');
-    console.log('\n===== SAVE THIS AUTH_DATA =====\n'+b64.substring(0,100)+'...\n===== END =====\n');
-    return b64;
-  }catch(e){}
-}
-loadAuth();
+// Clean old auth on start
+if (fs.existsSync(AUTH_DIR)) fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-async function startBot(){
-  if(!fs.existsSync(AUTH_FOLDER)) fs.mkdirSync(AUTH_FOLDER,{recursive:true});
-  const {state,saveCreds} = await useMultiFileAuthState(AUTH_FOLDER);
+async function startBot() {
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
   const sock = makeWASocket({
-    auth:{creds:state.creds, keys:makeCacheableSignalKeyStore(state.keys, pino({level:'silent'}))},
-    logger:pino({level:'silent'}),
-    browser:Browsers.ubuntu('Chrome'),
-    printQRInTerminal:false
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+    },
+    logger: pino({ level: 'silent' }),
+    browser: Browsers.macOS('Desktop'),
+    printQRInTerminal: false
   });
 
-  if(!state.creds.registered){
-    await delay(2000);
-    try{
-      const num=(process.env.PHONE_NUMBER||'').replace(/[^0-9]/g,'');
-      if(num){ pairCode = await sock.requestPairingCode(num); console.log('Pair Code:',pairCode); }
-    }catch(e){ console.log('Pair error',e.message) }
-  }
-
-  sock.ev.on('creds.update', async()=>{ await saveCreds(); await saveAuth(); });
-  sock.ev.on('connection.update', async(u)=>{
-    const {connection,lastDisconnect,qr} = u;
-    if(qr){
-      qrImage = await QRCode.toDataURL(qr);
-      console.log('QR Generated - Check website /qr');
+  // Generate Pairing Code every 25 sec
+  const genPair = async () => {
+    try {
+      if (!state.creds.registered) {
+        const num = (process.env.PHONE_NUMBER || '').replace(/\D/g, '');
+        if (num) {
+          await new Promise(r => setTimeout(r, 2000));
+          const code = await sock.requestPairingCode(num);
+          pairCode = code;
+          console.log('PAIR CODE:', code);
+        } else {
+          pairCode = 'Set PHONE_NUMBER env';
+        }
+      }
+    } catch (e) {
+      console.log('Pair gen err:', e.message);
     }
-    if(connection==='open'){ connectionStatus='CONNECTED ✅'; console.log('✅ Connected!'); qrImage=''; pairCode='Connected'; await saveAuth(); }
-    else if(connection==='close'){
-      const code = lastDisconnect?.error?.output?.statusCode;
-      if(code===401){ connectionStatus='Logged Out - Re-pair needed'; qrImage=''; }
-      else { connectionStatus='Reconnecting...'; setTimeout(startBot,5000); }
+  };
+  genPair();
+  setInterval(genPair, 25000);
+
+  sock.ev.on('creds.update', async () => {
+    await saveCreds();
+    try {
+      const files = fs.readdirSync(AUTH_DIR);
+      const data = {};
+      for (const f of files) data[f] = fs.readFileSync(`${AUTH_DIR}/${f}`, 'utf-8');
+      authB64 = Buffer.from(JSON.stringify(data)).toString('base64');
+      fs.writeFileSync('auth.txt', authB64);
+      console.log('AUTH SAVED');
+    } catch {}
+  });
+
+  sock.ev.on('connection.update', async (u) => {
+    const { connection, lastDisconnect, qr } = u;
+    if (qr) {
+      qrBase64 = await QRCode.toDataURL(qr);
+      status = 'QR Ready - Scan Now!';
+      console.log('QR READY');
+    }
+    if (connection === 'open') {
+      status = 'CONNECTED ✅';
+      qrBase64 = '';
+      pairCode = 'CONNECTED ✅';
+      console.log('CONNECTED SUCCESS');
+    }
+    if (connection === 'close') {
+      const reason = lastDisconnect?.error?.output?.statusCode;
+      if (reason === DisconnectReason.loggedOut || reason === 401) {
+        status = 'Logged Out - Refresh for New QR';
+        qrBase64 = '';
+        if (fs.existsSync(AUTH_DIR)) fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+        fs.mkdirSync(AUTH_DIR, { recursive: true });
+        setTimeout(startBot, 3000);
+      } else {
+        status = 'Reconnecting...';
+        setTimeout(startBot, 4000);
+      }
     }
   });
-  sock.ev.on('messages.upsert', async({messages})=>{
-    const msg=messages[0]; if(!msg?.message) return;
-    const text=msg.message.conversation||msg.message.extendedTextMessage?.text||'';
-    if(text.toLowerCase()==='.menu') await sock.sendMessage(msg.key.remoteJid,{text:'*Obito V34 FINAL 🔥*\n✅ Connected!\n\nCommands:\n.menu\n.ping\n.alive'});
-    if(text.toLowerCase()==='.ping') await sock.sendMessage(msg.key.remoteJid,{text:'Pong! V34 Live 🏓'});
-    if(text.toLowerCase()==='.alive') await sock.sendMessage(msg.key.remoteJid,{text:'Obito V34 FINAL is Alive! 🚀 Permanent Mode ON'});
+
+  sock.ev.on('messages.upsert', async ({ messages }) => {
+    const m = messages[0];
+    if (!m?.message) return;
+    const txt = m.message.conversation || m.message.extendedTextMessage?.text || '';
+    if (txt.toLowerCase() === '.menu') await sock.sendMessage(m.key.remoteJid, { text: '*Obito V36 FINAL 🔥*\n\n.menu\n.ping\n.alive' });
+    if (txt.toLowerCase() === '.ping') await sock.sendMessage(m.key.remoteJid, { text: 'Pong! V36 Live 🏓' });
   });
 }
 
-app.get('/',(req,res)=>{
-  res.send(`<body style="background:#0f172a;color:#fff;text-align:center;font-family:sans-serif;padding:20px"><div style="background:#1e3a8a;padding:25px;border-radius:15px;max-width:500px;margin:auto"><h2>🤖 Obito V34 FINAL</h2><p>Status: <b>${connectionStatus}</b></p>${qrImage?`<img src="${qrImage}" style="width:280px;background:#fff;padding:10px;border-radius:10px"><p>Scan this QR in WhatsApp</p>`:''}<p>Pair Code: <b style="font-size:28px;letter-spacing:4px;color:#60f">${pairCode||'Wait...'}</b></p><p style="font-size:12px;color:#aaa">Code expires in 30sec - Refresh for new code</p><a href="/saveauth" style="display:inline-block;margin:10px;padding:10px 20px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none">📋 Get AUTH_DATA</a><a href="/qr" style="display:inline-block;margin:10px;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none">📱 Show QR</a></div><script>setTimeout(()=>location.reload(),30000)</script></body>`);
+app.get('/', (req, res) => {
+  res.send(`
+  <html>
+  <body style="background:#020617;color:white;text-align:center;font-family:Arial;padding:20px">
+  <div style="background:#1e293b;padding:25px;border-radius:20px;max-width:480px;margin:auto;border:2px solid #3b82f6">
+  <h2>🤖 Obito V36 FINAL</h2>
+  <p>Status: <b style="color:#38bdf8">${status}</b></p>
+  ${qrBase64 ? `<img src="${qrBase64}" style="width:310px;background:white;padding:12px;border-radius:15px"><p style="color:#22c55e">Scan in WhatsApp > Linked Devices</p>` : `<p style="color:#fbbf24">Generating QR... Refresh after 10 sec</p>`}
+  <p>Pair Code: <b style="font-size:28px;letter-spacing:3px;color:#facc15">${pairCode}</b></p>
+  <p style="font-size:11px;color:#94a3b8">Code expires 30sec - Auto refresh 20sec</p>
+  <a href="/qr" style="background:#2563eb;color:white;padding:12px 22px;border-radius:10px;text-decoration:none;margin:6px;display:inline-block">📱 FULL QR</a>
+  <a href="/auth" style="background:#16a34a;color:white;padding:12px 22px;border-radius:10px;text-decoration:none;margin:6px;display:inline-block">📋 Get AUTH_DATA</a>
+  </div>
+  <script>setTimeout(()=>location.reload(),20000)</script>
+  </body></html>`);
 });
-app.get('/qr',(req,res)=>{
-  if(qrImage) res.send(`<body style="background:#000;text-align:center;padding:20px"><h2 style="color:#fff">Scan QR - Expires 30sec</h2><img src="${qrImage}" style="width:350px;background:#fff;padding:15px;border-radius:15px"><br><br><a href="/" style="color:#fff;background:#2563eb;padding:10px 20px;border-radius:8px;text-decoration:none">Back</a><script>setTimeout(()=>location.reload(),20000)</script></body>`);
-  else res.send(`<body style="background:#111;color:#fff;text-align:center;padding:40px"><h3>${connectionStatus}</h3><p>${pairCode?`Pair Code: ${pairCode}`:'Waiting...'}</p><a href="/" style="color:#fff">Back</a><script>setTimeout(()=>location.reload(),5000)</script></body>`);
+
+app.get('/qr', (req, res) => {
+  if (!qrBase64) return res.send(`<body style="background:#020617;color:white;text-align:center;padding:40px"><h2>${status}</h2><h1 style="color:#facc15">${pairCode}</h1><p>Wait 10 sec...</p><a href="/" style="color:white">Back</a><script>setTimeout(()=>location.reload(),5000)</script></body>`);
+  res.send(`<body style="background:black;text-align:center;padding:20px"><h2 style="color:white">Scan QR - 30sec only</h2><img src="${qrBase64}" style="width:95%;max-width:420px;background:white;padding:18px;border-radius:20px"><br><br><a href="/" style="background:#2563eb;color:white;padding:12px 20px;border-radius:8px;text-decoration:none">Back</a></body>`);
 });
-app.get('/saveauth',(req,res)=>{
-  try{
-    if(fs.existsSync('auth_data.txt')) return res.type('text/plain').send(fs.readFileSync('auth_data.txt','utf-8'));
-    if(authDataBase64) return res.type('text/plain').send(authDataBase64);
-    if(fs.existsSync(AUTH_FOLDER)){
-      const files=fs.readdirSync(AUTH_FOLDER);
-      if(files.length>0){const d={}; for(const f of files) d[f]=fs.readFileSync(path.join(AUTH_FOLDER,f),'utf-8'); return res.type('text/plain').send(Buffer.from(JSON.stringify(d)).toString('base64'));}
-    }
-    res.send('Not ready - Pair first!');
-  }catch(e){res.send('Error '+e.message);}
+
+app.get('/auth', (req, res) => {
+  try {
+    if (fs.existsSync('auth.txt')) return res.type('text/plain').send(fs.readFileSync('auth.txt', 'utf-8'));
+    return res.type('text/plain').send(authB64 || 'Not connected yet - Scan QR first');
+  } catch { res.send('Not ready'); }
 });
-app.listen(PORT,()=>{ console.log('Server '+PORT); startBot(); });
+
+app.listen(PORT, () => { console.log('PORT ' + PORT); startBot(); });
